@@ -74,7 +74,6 @@ export default function Home() {
       onSuccess: () => {
         refetch();
         setOpenDialog(false);
-        toast.success("Journal deleted successfully.");
       },
       onError: () => toast.error("Failed to delete journal."),
     });
