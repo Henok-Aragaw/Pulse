@@ -18,7 +18,7 @@ const playfair = Playfair_Display({
 })
 
 export const metadata: Metadata = {
-  title: "Luma",
+  title: "Pulse",
    description: "AI-powered mood journal and emotional tracker.",
 };
 

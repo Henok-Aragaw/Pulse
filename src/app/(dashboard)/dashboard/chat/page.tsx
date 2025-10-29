@@ -20,8 +20,8 @@ import { toast } from "sonner";
 import { Loader2, Sparkles, Calendar, Trash2 } from "lucide-react";
 
 type AIResponse = {
-  mood: string;
-  summary: string;
+  mood: string | null;
+  summary: string | null;
   advice: string;
 };
 
@@ -100,6 +100,16 @@ export default function Home() {
 
       if (!res.ok) throw new Error("AI analysis failed");
       const analysis: AIResponse = await res.json();
+
+      // Check if this is a validation error (mood is null)
+      if (analysis.mood === null) {
+        // Show validation message with animation, but don't save
+        setCurrentAnalysis(analysis);
+        await animateValidationMessage(analysis.advice);
+        setLoading(false);
+        return;
+      }
+
       setCurrentAnalysis(analysis);
 
       await animateLineByLine(analysis);
@@ -130,6 +140,14 @@ export default function Home() {
     }
   };
 
+  const animateValidationMessage = async (message: string) => {
+    setDisplayedAdvice("");
+    for (let i = 0; i < message.length; i++) {
+      setDisplayedAdvice((prev) => prev + message[i]);
+      await new Promise((r) => setTimeout(r, 20));
+    }
+  };
+
   const animateLineByLine = async (data: AIResponse) => {
     const typeLines = async (
       text: string,
@@ -148,9 +166,15 @@ export default function Home() {
       }
     };
 
-    await typeLines(data.summary, setDisplayedSummary);
-    await new Promise((r) => setTimeout(r, 400));
-    setShowMood(true);
+    if (data.summary) {
+      await typeLines(data.summary, setDisplayedSummary);
+      await new Promise((r) => setTimeout(r, 400));
+    }
+    
+    if (data.mood) {
+      setShowMood(true);
+    }
+    
     await typeLines(data.advice, setDisplayedAdvice, 300, 20);
   };
 
@@ -275,39 +299,54 @@ export default function Home() {
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
           >
-            <h2 className="text-lg font-semibold mb-3 text-neutral-800 dark:text-neutral-100">
-              AI Summary
-            </h2>
-            <pre className="text-sm whitespace-pre-wrap leading-relaxed text-neutral-700 dark:text-neutral-300 mb-4">
-              {displayedSummary}
-            </pre>
+            {currentAnalysis.mood ? (
+              <>
+                <h2 className="text-lg font-semibold mb-3 text-neutral-800 dark:text-neutral-100">
+                  AI Summary
+                </h2>
+                <pre className="text-sm whitespace-pre-wrap leading-relaxed text-neutral-700 dark:text-neutral-300 mb-4">
+                  {displayedSummary}
+                </pre>
 
-            {showMood && currentAnalysis.mood && (
-              <motion.div
-                initial={{ opacity: 0, y: 10 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ duration: 0.5 }}
-                className="mb-4"
-              >
-                <div
-                  className="inline-flex items-center gap-2 px-3 py-1 rounded-full text-sm font-medium"
-                  style={{
-                    backgroundColor: `${getMoodColor(currentAnalysis.mood)}20`,
-                    color: getMoodColor(currentAnalysis.mood),
-                  }}
-                >
-                  <span>Detected Mood:</span>
-                  <span className="font-semibold capitalize">{currentAnalysis.mood}</span>
-                  <span>{getMoodEmoji(currentAnalysis.mood)}</span>
+                {showMood && currentAnalysis.mood && (
+                  <motion.div
+                    initial={{ opacity: 0, y: 10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ duration: 0.5 }}
+                    className="mb-4"
+                  >
+                    <div
+                      className="inline-flex items-center gap-2 px-3 py-1 rounded-full text-sm font-medium"
+                      style={{
+                        backgroundColor: `${getMoodColor(currentAnalysis.mood)}20`,
+                        color: getMoodColor(currentAnalysis.mood),
+                      }}
+                    >
+                      <span>Detected Mood:</span>
+                      <span className="font-semibold capitalize">{currentAnalysis.mood}</span>
+                      <span>{getMoodEmoji(currentAnalysis.mood)}</span>
+                    </div>
+                  </motion.div>
+                )}
+
+                <div className="bg-neutral-50 dark:bg-neutral-950 p-4 rounded-lg border border-neutral-200 dark:border-neutral-800">
+                  <pre className="text-sm whitespace-pre-wrap leading-relaxed text-neutral-700 dark:text-neutral-300">
+                    {displayedAdvice}
+                  </pre>
                 </div>
-              </motion.div>
+              </>
+            ) : (
+              <>
+                <h2 className="text-lg font-semibold mb-3 text-neutral-800 dark:text-neutral-100">
+                  AI Response
+                </h2>
+                <div className="bg-neutral-50 dark:bg-neutral-950 p-4 rounded-lg border border-neutral-200 dark:border-neutral-800">
+                  <pre className="text-sm whitespace-pre-wrap leading-relaxed text-neutral-700 dark:text-neutral-300">
+                    {displayedAdvice}
+                  </pre>
+                </div>
+              </>
             )}
-
-            <div className="bg-neutral-50 dark:bg-neutral-950 p-4 rounded-lg border border-neutral-200 dark:border-neutral-800">
-              <pre className="text-sm whitespace-pre-wrap leading-relaxed text-neutral-700 dark:text-neutral-300">
-                {displayedAdvice}
-              </pre>
-            </div>
           </motion.div>
         )}
 
