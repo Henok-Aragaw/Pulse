@@ -6,7 +6,6 @@ import { PrismaClient } from "@/generated/prisma";
 import { nextCookies } from "better-auth/next-js";
 import { createAuthMiddleware } from "better-auth/api";
 import { normalizeName, VALID_DOMAIN } from "./utils";
-import { Import } from "lucide-react";
 
 const prisma = new PrismaClient();
 
@@ -24,8 +23,8 @@ try {
     },
     socialProviders: {
       google: {
-        clientId: process.env.GOOGLE_CLIENT_ID!,
-        clientSecret: process.env.GOOGLE_CLIENT_SECRET!,
+        clientId: process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID as string,
+        clientSecret: process.env.NEXT_SECRET_GOOGLE_CLIENT_SECRET as string,
       },
     },
     hooks: {
