@@ -3,7 +3,7 @@ import type { auth } from "@/lib/auth";
 import { NextRequest, NextResponse } from "next/server";
  
 type Session = typeof auth.$Infer.Session;
-const protectedRoutes = ["/dashboard"];
+const protectedRoutes = ["/dashboard", "/dashboard/chat","/dashboard/setting"];
 
 export async function middleware(request: NextRequest) {
     const {nextUrl} = request;
