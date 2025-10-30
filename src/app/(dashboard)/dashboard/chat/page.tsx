@@ -387,7 +387,7 @@ export default function Home() {
 
                   <div className="space-y-2 pt-3 border-t border-neutral-100 dark:border-neutral-800">
                     <div className="text-xs font-medium text-neutral-500 dark:text-neutral-500">
-                      Pulse INSIGHTS
+                      PULSE INSIGHTS
                     </div>
                     <p className="text-sm text-neutral-600 dark:text-neutral-400 leading-relaxed">
                       {j.summary}
