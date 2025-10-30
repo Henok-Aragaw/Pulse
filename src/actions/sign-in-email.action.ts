@@ -2,7 +2,6 @@
 
 import { auth } from "@/lib/auth";
 import { APIError } from "better-auth/api";
-// import { parseSetCookieHeader } from "better-auth/cookies"; //we used this for setup cookie manualy
 import { headers } from "next/headers";
 
 export const signInEmailAction = async(formdata:FormData) => {
@@ -20,29 +19,7 @@ export const signInEmailAction = async(formdata:FormData) => {
             email,
             password
         },
-        // asResponse:true
      })
-
-     //set cookie manually
-    //  const setCookieHeader = res.headers.get('set-cookie');
-    //  if(setCookieHeader){
-    //     const cookie = parseSetCookieHeader(setCookieHeader);
-    //     const cookieStore = await cookies();
-
-    //     const [key, cookieAttributes] = [...cookie.entries()][0];
-    //     const value = cookieAttributes.value;
-    //     const maxAge = cookieAttributes['max-age'];
-    //     const path = cookieAttributes.path;
-    //     const httpOnly = cookieAttributes.httponly;
-    //     const sameSite = cookieAttributes.samesite;
-
-    //     cookieStore.set(key, decodeURIComponent(value), {
-    //         maxAge,
-    //         path,
-    //         httpOnly,
-    //         sameSite,
-    //     })
-    //  }
 
      return {error:null}
     } catch (error) {

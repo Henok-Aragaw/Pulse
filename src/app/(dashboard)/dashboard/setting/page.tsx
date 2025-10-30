@@ -15,7 +15,7 @@ import {
 } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 
-// ✅ Proper typing for sessions
+
 type Session = {
   id: string;
   createdAt: string;

@@ -102,7 +102,7 @@ export default function Home() {
 
       // Check if this is a validation error (mood is null)
       if (analysis.mood === null) {
-        // Show validation message with animation, but don't save
+        // Show validation message with animation
         setCurrentAnalysis(analysis);
         await animateValidationMessage(analysis.advice);
         setLoading(false);

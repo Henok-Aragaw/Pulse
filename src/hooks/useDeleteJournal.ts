@@ -27,7 +27,7 @@ export function useDeleteJournal() {
     },
   });
 
-  // ✅ Return consistent naming
+  // consistent naming
   return {
     mutate: mutation.mutate,
     isPending: mutation.isPending,

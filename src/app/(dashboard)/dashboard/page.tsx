@@ -14,7 +14,6 @@ export default async function DashboardPage() {
         Welcome back, {session.user.name}
       </h1>
 
-      {/* Client component */}
       <DashboardSummary />
     </main>
   );
