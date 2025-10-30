@@ -130,7 +130,7 @@ export default function Home() {
       setAiResponse(savedJournal);
       refetch();
       setText("");
-      toast.success("AI journal saved successfully!");
+      toast.success("journal saved successfully!");
     } catch (err) {
       console.error(err);
       toast.error("Something went wrong during analysis.");
@@ -228,7 +228,7 @@ export default function Home() {
             <Sparkles className="w-8 h-8 text-neutral-50 dark:text-neutral-900" />
           </div>
           <h1 className="text-3xl font-semibold text-neutral-900 dark:text-neutral-50 mb-2">
-            AI Journal
+            Pulse Journal
           </h1>
           <p className="text-neutral-600 dark:text-neutral-400 text-sm">
             Reflect on your thoughts with AI-powered insights
@@ -257,7 +257,7 @@ export default function Home() {
               ) : (
                 <>
                   <Sparkles className="mr-2 h-4 w-4" />
-                  Analyze with AI
+                  Analyze with Pulse AI
                 </>
               )}
             </Button>
@@ -301,7 +301,7 @@ export default function Home() {
             {currentAnalysis.mood ? (
               <>
                 <h2 className="text-lg font-semibold mb-3 text-neutral-800 dark:text-neutral-100">
-                  AI Summary
+                  Pulse Summary
                 </h2>
                 <pre className="text-sm whitespace-pre-wrap leading-relaxed text-neutral-700 dark:text-neutral-300 mb-4">
                   {displayedSummary}
