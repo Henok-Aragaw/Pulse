@@ -337,7 +337,7 @@ export default function Home() {
             ) : (
               <>
                 <h2 className="text-lg font-semibold mb-3 text-neutral-800 dark:text-neutral-100">
-                  AI Response
+                  Pulse Response
                 </h2>
                 <div className="bg-neutral-50 dark:bg-neutral-950 p-4 rounded-lg border border-neutral-200 dark:border-neutral-800">
                   <pre className="text-sm whitespace-pre-wrap leading-relaxed text-neutral-700 dark:text-neutral-300">
@@ -387,7 +387,7 @@ export default function Home() {
 
                   <div className="space-y-2 pt-3 border-t border-neutral-100 dark:border-neutral-800">
                     <div className="text-xs font-medium text-neutral-500 dark:text-neutral-500">
-                      AI INSIGHTS
+                      Pulse INSIGHTS
                     </div>
                     <p className="text-sm text-neutral-600 dark:text-neutral-400 leading-relaxed">
                       {j.summary}
