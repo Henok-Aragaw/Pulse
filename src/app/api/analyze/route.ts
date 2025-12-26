@@ -10,7 +10,8 @@ async function callGemini(modelName: string, prompt: string) {
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${process.env.GEMINI_API_KEY}`;
   const body = {
     contents: [{ parts: [{ text: prompt }] }],
-    generationConfig: { temperature: 0.4, maxOutputTokens: 4096 },
+    // Temperature 0.6 balances creativity with calmness/consistency
+    generationConfig: { temperature: 0.6, maxOutputTokens: 1024 }, 
   };
   const res = await fetch(url, {
     method: "POST",
@@ -37,62 +38,53 @@ function safeParseGeminiOutput(raw: string) {
   }
 }
 
+
+type HistoryItem = {
+  user: string;
+  ai: string;
+};
+
 export async function POST(req: Request) {
   try {
-    const { text } = await req.json();
+    const { text, history } = await req.json();
     if (!text) return NextResponse.json({ error: "Missing text" }, { status: 400 });
 
-    // Step 1: Context check
-    const contextPrompt = `
-You are an AI that strictly validates journal entries. Only respond true if input expresses emotions, thoughts, or reflections in a way that can be understood.
-If the input is gibberish, random letters, numbers only, non-English, or unclear, respond ONLY with:
-{
-  "isValid": false,
-  "message": "I don't understand what you mean. Could you reflect and share your thoughts or feelings in a few sentences?"
-}
-If valid, respond ONLY with:
-{
-  "isValid": true
-}
-Input:
-"""${text}"""
-Respond with ONLY JSON.
-`.trim();
+    const historyContext = Array.isArray(history)
+      ? history
+          .map((msg: HistoryItem) => `User: ${msg.user}\nPulse: ${msg.ai}`)
+          .join("\n\n")
+      : "";
 
-    let contextResponse: Response | null = null;
-    for (const model of GEMINI_MODELS) {
-      contextResponse = await callGemini(model, contextPrompt);
-      if (contextResponse.ok) break;
-    }
-
-    if (!contextResponse?.ok) {
-      return NextResponse.json({ error: "Context check failed" }, { status: 503 });
-    }
-
-    const contextResult = await contextResponse.json();
-    const contextRaw = contextResult?.candidates?.[0]?.content?.parts?.[0]?.text ?? "";
-    const contextParsed = safeParseGeminiOutput(contextRaw);
-
-    // ⚠ Stop completely if invalid or parsing fails
-    if (!contextParsed?.isValid) {
-      return NextResponse.json({
-        mood: null,
-        summary: null,
-        advice: contextParsed?.message ?? "I don't understand what you mean. Could you share your feelings in a few sentences?",
-      });
-    }
-
-    // Step 2: Only valid input → analysis
     const analysisPrompt = `
-You are an empathetic emotional-support AI assistant.
-Analyze the following journal entry and respond ONLY with valid JSON:
-Make sure the JSON is complete and the advice field contains 5–7 full, detailed points.
+You are Pulse, a compassionate AI therapist and emotional companion developed by Henok Aragaw.
+Your purpose is to support people suffering from loneliness, anxiety, depression, or isolation.
+
+IDENTITY & COMPLIANCE:
+- If asked who you are/who made you: "I am Pulse, a therapeutic AI developed by Henok Aragaw, based on the Gemini API."
+- CRISIS PROTOCOL: If the user expresses intent of self-harm, suicide, or severe danger, your response MUST be supportive but strictly encourage seeking professional emergency help or calling a crisis line immediately.
+
+THERAPEUTIC GUIDELINES:
+1. **Validate First**: Always acknowledge the user's pain or loneliness. Use phrases like "I hear how heavy that feels" or "It's understandable you feel this way."
+2. **Be a Companion**: For users feeling lonely, be warm, present, and engaged. Make them feel seen and heard.
+3. **Gentle Inquiry**: Don't just lecture. Ask open-ended, low-pressure questions to help them process their thoughts (e.g., "What does that feeling look like for you today?").
+4. **No Medical Diagnosis**: Do not diagnose conditions. Act as a supportive counselor/friend, not a clinical psychiatrist.
+5. **Tone**: Soft, patient, non-judgmental, and deeply empathetic.
+
+CONTEXT (Previous Conversation):
+"""
+${historyContext}
+"""
+
+INSTRUCTIONS:
+Respond to the user's new message based on the Context.
+Respond ONLY with valid JSON:
 {
-  "mood": "one- or two-word emotion like happy, anxious, hopeful, calm, etc.",
-  "summary": "a short, neutral summary of the user's thoughts.",
-  "advice": "a long, compassionate message with 5–7 numbered or bulleted points giving practical emotional support, mindset tips, and self-care actions."
+  "mood": "one word emotion (e.g. Lonely, Anxious, Heartbroken, Hopeful, Happy)",
+  "summary": "very short 3-5 word topic tag",
+  "advice": "Your therapeutic, conversational response. Do not use bullet points unless necessary. Write as if you are speaking softly to them."
 }
-Journal entry:
+
+Current User Message:
 """${text}"""
 `.trim();
 
@@ -113,8 +105,8 @@ Journal entry:
     return NextResponse.json(
       parsed ?? {
         mood: "Neutral",
-        summary: "No summary provided.",
-        advice: "Keep journaling — self-expression brings healing and clarity.",
+        summary: "Connection",
+        advice: "I am here with you. I might be having trouble processing right now, but please know you are not alone.",
       }
     );
   } catch (err: unknown) {

@@ -1,9 +1,8 @@
 "use client";
 
-import { useState, useEffect } from "react";
-import { motion } from "framer-motion";
+import { useState, useEffect, useRef } from "react";
+import { motion, AnimatePresence } from "framer-motion";
 import { Button } from "@/components/ui/button";
-import { Card } from "@/components/ui/card";
 import { Textarea } from "@/components/ui/textarea";
 import {
   Dialog,
@@ -16,52 +15,162 @@ import {
 import { useSession } from "@/lib/auth-client";
 import { useJournals } from "@/hooks/useJournals";
 import { useDeleteJournal } from "@/hooks/useDeleteJournal";
+import { useChat, Journal } from "@/hooks/useChat";
 import { toast } from "sonner";
-import { Loader2, Sparkles, Calendar, Trash2 } from "lucide-react";
+import { Loader2, Send, Trash2, Bot, Mic, StopCircle, Sparkles } from "lucide-react";
 
-type AIResponse = {
-  mood: string | null;
-  summary: string | null;
-  advice: string;
-};
+// --- Type Definitions for Speech API (No 'any') ---
 
-type Journal = {
-  id: string;
-  text: string;
-  mood: string;
-  summary: string;
-  advice: string;
-  createdAt: string;
-};
+interface SpeechRecognitionAlternative {
+  transcript: string;
+  confidence: number;
+}
+
+interface SpeechRecognitionResult {
+  isFinal: boolean;
+  length: number;
+  item(index: number): SpeechRecognitionAlternative;
+  [index: number]: SpeechRecognitionAlternative;
+}
+
+interface SpeechRecognitionResultList {
+  length: number;
+  item(index: number): SpeechRecognitionResult;
+  [index: number]: SpeechRecognitionResult;
+  [Symbol.iterator](): IterableIterator<SpeechRecognitionResult>;
+}
+
+interface SpeechRecognitionEvent extends Event {
+  results: SpeechRecognitionResultList;
+  resultIndex: number;
+}
+
+interface SpeechRecognitionErrorEvent extends Event {
+  error: string;
+  message: string;
+}
+
+interface SpeechRecognition extends EventTarget {
+  lang: string;
+  continuous: boolean;
+  interimResults: boolean;
+  start(): void;
+  stop(): void;
+  abort(): void;
+  onstart: ((this: SpeechRecognition, ev: Event) => unknown) | null;
+  onend: ((this: SpeechRecognition, ev: Event) => unknown) | null;
+  onerror: ((this: SpeechRecognition, ev: SpeechRecognitionErrorEvent) => unknown) | null;
+  onresult: ((this: SpeechRecognition, ev: SpeechRecognitionEvent) => unknown) | null;
+}
+
+// Extend Window interface locally
+interface IWindow extends Window {
+  webkitSpeechRecognition: { new (): SpeechRecognition };
+  SpeechRecognition: { new (): SpeechRecognition };
+}
 
 export default function Home() {
   const { data: session } = useSession();
+  
+  // Data Hooks
   const { data: journals, refetch } = useJournals();
   const { mutate: deleteJournal, isPending: isDeleting } = useDeleteJournal();
+  
+  // Logic Hooks
+  const { sendMessage, isAnalyzing } = useChat(refetch);
 
+  // UI State
   const [text, setText] = useState("");
-  const [loading, setLoading] = useState(false);
-  const [aiResponse, setAiResponse] = useState<AIResponse | null>(null);
-  const [displayedSummary, setDisplayedSummary] = useState("");
-  const [displayedAdvice, setDisplayedAdvice] = useState("");
-  const [currentAnalysis, setCurrentAnalysis] = useState<AIResponse | null>(null);
-
-  const [showMood, setShowMood] = useState(false);
-
+  const [isListening, setIsListening] = useState(false);
+  const [voiceSupported, setVoiceSupported] = useState(false);
   const [openDialog, setOpenDialog] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  
+  const messagesEndRef = useRef<HTMLDivElement>(null);
 
-  const [dotCount, setDotCount] = useState(0);
+  // Check Voice Support
   useEffect(() => {
-    if (loading) {
-      const interval = setInterval(() => {
-        setDotCount((prev) => (prev + 1) % 4);
-      }, 400);
-      return () => clearInterval(interval);
-    } else {
-      setDotCount(0);
+    if (typeof window !== "undefined") {
+      const win = window as unknown as IWindow;
+      if (win.webkitSpeechRecognition || win.SpeechRecognition) {
+        setVoiceSupported(true);
+      }
     }
-  }, [loading]);
+  }, []);
+
+  // Sort History
+  const chatHistory = journals
+    ? [...journals].sort((a: Journal, b: Journal) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime())
+    : [];
+
+  // Auto Scroll
+  const scrollToBottom = () => {
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  };
+
+  useEffect(() => {
+    scrollToBottom();
+  }, [chatHistory.length, isAnalyzing]);
+
+  // Handlers
+
+  const handleSend = async (textOverride?: string) => {
+    if (!session) return toast.error("Please sign in first.");
+    
+    const content = typeof textOverride === "string" ? textOverride : text;
+    if (!content.trim()) return;
+
+    // Optimistically clear UI
+    setText(""); 
+    
+    const success = await sendMessage(content, chatHistory);
+    
+    if (!success) setText(content);
+  };
+
+  const handleVoiceInput = () => {
+    if (isListening) {
+      setIsListening(false); 
+      return;
+    }
+
+    const win = window as unknown as IWindow;
+    const RecognitionConstructor = win.SpeechRecognition || win.webkitSpeechRecognition;
+    
+    if (!RecognitionConstructor) return toast.error("Voice recognition not supported.");
+
+    const recognition = new RecognitionConstructor();
+    recognition.lang = "en-US";
+    recognition.continuous = false;
+    recognition.interimResults = true;
+    let finalTranscript = "";
+
+    recognition.onstart = () => {
+      setIsListening(true);
+      setText("");
+    };
+
+    recognition.onresult = (event: SpeechRecognitionEvent) => {
+      const resultsArray = Array.from(event.results);
+      
+      const transcript = resultsArray
+        .map((result) => result[0]) 
+        .map((result) => result.transcript)
+        .join("");
+        
+      finalTranscript = transcript;
+      setText(transcript);
+    };
+
+    recognition.onerror = () => setIsListening(false);
+    
+    recognition.onend = () => {
+      setIsListening(false);
+      if (finalTranscript.trim().length > 0) handleSend(finalTranscript);
+    };
+
+    recognition.start();
+  };
 
   const handleDelete = (id: string) => {
     setSelectedId(id);
@@ -75,373 +184,207 @@ export default function Home() {
         refetch();
         setOpenDialog(false);
       },
-      onError: () => toast.error("Failed to delete journal."),
+      onError: () => toast.error("Failed to delete message."),
     });
   };
 
-  const handleAnalyze = async () => {
-    if (!session) return toast.error("Please sign in first.");
-    if (!text.trim()) return toast.warning("Please write something first!");
-
-    try {
-      setLoading(true);
-      setAiResponse(null);
-      setDisplayedSummary("");
-      setDisplayedAdvice("");
-      setCurrentAnalysis(null);
-      setShowMood(false);
-
-      const res = await fetch("/api/analyze", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text }),
-      });
-
-      if (!res.ok) throw new Error("AI analysis failed");
-      const analysis: AIResponse = await res.json();
-
-      // Check if this is a validation error (mood is null)
-      if (analysis.mood === null) {
-        // Show validation message with animation
-        setCurrentAnalysis(analysis);
-        await animateValidationMessage(analysis.advice);
-        setLoading(false);
-        return;
-      }
-
-      setCurrentAnalysis(analysis);
-
-      await animateLineByLine(analysis);
-
-      const saveRes = await fetch("/api/journals", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          text,
-          mood: analysis.mood,
-          summary: analysis.summary,
-          advice: analysis.advice,
-        }),
-      });
-
-      if (!saveRes.ok) throw new Error("Failed to save journal");
-      const savedJournal: Journal = await saveRes.json();
-
-      setAiResponse(savedJournal);
-      refetch();
-      setText("");
-      toast.success("journal saved successfully!");
-    } catch (err) {
-      console.error(err);
-      toast.error("Something went wrong during analysis.");
-    } finally {
-      setLoading(false);
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      handleSend();
     }
   };
 
-  const animateValidationMessage = async (message: string) => {
-    setDisplayedAdvice("");
-    for (let i = 0; i < message.length; i++) {
-      setDisplayedAdvice((prev) => prev + message[i]);
-      await new Promise((r) => setTimeout(r, 20));
-    }
-  };
-
-  const animateLineByLine = async (data: AIResponse) => {
-    const typeLines = async (
-      text: string,
-      setter: React.Dispatch<React.SetStateAction<string>>,
-      lineDelay = 200,
-      charDelay = 15
-    ) => {
-      const lines = text.split("\n").filter(Boolean);
-      for (const line of lines) {
-        for (let i = 0; i < line.length; i++) {
-          setter((prev) => prev + line[i]);
-          await new Promise((r) => setTimeout(r, charDelay));
-        }
-        setter((prev) => prev + "\n");
-        await new Promise((r) => setTimeout(r, lineDelay));
-      }
-    };
-
-    if (data.summary) {
-      await typeLines(data.summary, setDisplayedSummary);
-      await new Promise((r) => setTimeout(r, 400));
-    }
-    
-    if (data.mood) {
-      setShowMood(true);
-    }
-    
-    await typeLines(data.advice, setDisplayedAdvice, 300, 20);
-  };
-
-  const getMoodColor = (mood: string) => {
+  // Styles 
+  const getMoodStyle = (mood: string) => {
     switch (mood?.toLowerCase()) {
-      case "happy":
-        return "#10B981";
-      case "sad":
-        return "#3B82F6";
-      case "angry":
-        return "#EF4444";
-      case "anxious":
-        return "#F59E0B";
-      case "neutral":
-        return "#6B7280";
-      default:
-        return "#026652";
-    }
-  };
-
-  const getMoodEmoji = (mood: string) => {
-    switch (mood?.toLowerCase()) {
-      case "happy":
-        return "😊";
-      case "sad":
-        return "😢";
-      case "angry":
-        return "😠";
-      case "anxious":
-        return "😰";
-      case "excited":
-        return "🤩";
-      case "relaxed":
-        return "😌";
-      case "confused":
-        return "😕";
-      case "grateful":
-        return "🙏";
-      case "neutral":
-        return "😐";
-      default:
-        return "🤔";
+      case "happy": return "bg-emerald-50 text-emerald-900 border-emerald-100 dark:bg-emerald-900/20 dark:text-emerald-100 dark:border-emerald-800";
+      case "sad": return "bg-sky-50 text-sky-900 border-sky-100 dark:bg-sky-900/20 dark:text-sky-100 dark:border-sky-800";
+      case "angry": return "bg-rose-50 text-rose-900 border-rose-100 dark:bg-rose-900/20 dark:text-rose-100 dark:border-rose-800";
+      case "anxious": return "bg-amber-50 text-amber-900 border-amber-100 dark:bg-amber-900/20 dark:text-amber-100 dark:border-amber-800";
+      default: return "bg-neutral-50 text-neutral-900 border-neutral-100 dark:bg-neutral-800 dark:text-neutral-100 dark:border-neutral-700";
     }
   };
 
   return (
-    <main className="min-h-screen bg-neutral-50 dark:bg-neutral-950">
-      <div className="max-w-4xl mx-auto px-4 py-8 sm:px-6 lg:px-8">
-        {/* Header */}
-        <div className="mb-8 text-center">
-          <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-neutral-900 dark:bg-neutral-100 mb-4">
-            <Sparkles className="w-8 h-8 text-neutral-50 dark:text-neutral-900" />
-          </div>
-          <h1 className="text-3xl font-semibold text-neutral-900 dark:text-neutral-50 mb-2">
-            Pulse Journal
-          </h1>
-          <p className="text-neutral-600 dark:text-neutral-400 text-sm">
-            Reflect on your thoughts with AI-powered insights
-          </p>
-        </div>
+    <main className="relative flex flex-col h-screen bg-neutral-50 dark:bg-neutral-950 font-sans selection:bg-neutral-200 dark:selection:bg-neutral-800">
+      
+      {/* Chat Scroll Area */}
+      <div className="flex-1 overflow-y-auto pt-8 pb-32 px-4 sm:px-6 md:px-0 [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
+        <div className="max-w-3xl mx-auto space-y-8">
+          
+          {/* Empty State */}
+          {chatHistory.length === 0 && !isAnalyzing && (
+            <motion.div 
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              className="flex flex-col items-center justify-center text-center mt-20 space-y-6"
+            >
+              <div className="w-24 h-24 bg-gradient-to-br from-neutral-100 to-white dark:from-neutral-900 dark:to-neutral-800 rounded-3xl flex items-center justify-center shadow-sm border border-neutral-200 dark:border-neutral-800">
+                <Bot className="w-10 h-10 text-neutral-400" />
+              </div>
+              <div className="space-y-2">
+                <h3 className="text-xl font-semibold text-neutral-900 dark:text-white">Hi, I&apos;m Pulse.</h3>
+                <p className="text-neutral-500 dark:text-neutral-400 max-w-xs mx-auto leading-relaxed">
+                  I&apos;m here to listen, support, and help you process your thoughts. This is a safe space.
+                </p>
+              </div>
+            </motion.div>
+          )}
 
-        {/* Input Card */}
-        <Card className="mb-6 border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 shadow-sm">
-          <div className="p-6">
+          <AnimatePresence initial={false}>
+            {chatHistory.map((msg: Journal) => (
+              <div key={msg.id} className="space-y-2">
+                
+                {/* User Bubble */}
+                <motion.div 
+                  initial={{ opacity: 0, y: 10, scale: 0.98 }}
+                  animate={{ opacity: 1, y: 0, scale: 1 }}
+                  className="flex justify-end pl-12"
+                >
+                  <div className="group relative">
+                    <div className="bg-neutral-900 dark:bg-white text-white dark:text-neutral-900 px-6 py-3.5 rounded-[24px] rounded-tr-md shadow-md shadow-neutral-900/5">
+                      <p className="text-[15px] leading-relaxed whitespace-pre-wrap">{msg.text}</p>
+                    </div>
+                    {/* Delete Action */}
+                    <button 
+                      onClick={() => handleDelete(msg.id)}
+                      className="absolute -left-10 top-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-100 transition-all p-2 text-neutral-300 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-full"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+                  </div>
+                </motion.div>
+
+                {/* AI Bubble */}
+                <motion.div 
+                  initial={{ opacity: 0, y: 10, scale: 0.98 }}
+                  animate={{ opacity: 1, y: 0, scale: 1 }}
+                  transition={{ delay: 0.1 }}
+                  className="flex justify-start pr-8"
+                >
+                  <div className="flex flex-col items-start gap-1">
+                    <div className={`px-6 py-4 rounded-[24px] rounded-tl-md border ${getMoodStyle(msg.mood)}`}>
+                      <div className="flex items-center gap-2 mb-2 opacity-50">
+                        <Sparkles className="w-3 h-3" />
+                        <span className="text-[10px] uppercase font-bold tracking-wider">{msg.mood}</span>
+                      </div>
+                      <p className="text-[15px] leading-relaxed whitespace-pre-wrap">{msg.advice}</p>
+                    </div>
+                  </div>
+                </motion.div>
+              </div>
+            ))}
+          </AnimatePresence>
+
+          {/* Loading Indicator */}
+          {isAnalyzing && (
+             <motion.div 
+             initial={{ opacity: 0 }}
+             animate={{ opacity: 1 }}
+             className="flex justify-start pl-1"
+           >
+             <div className="px-5 py-4 bg-white dark:bg-neutral-900 border border-neutral-100 dark:border-neutral-800 rounded-[24px] rounded-tl-md shadow-sm flex items-center gap-2">
+                <div className="flex gap-1">
+                  <span className="w-1.5 h-1.5 bg-neutral-400 rounded-full animate-bounce [animation-delay:-0.3s]"></span>
+                  <span className="w-1.5 h-1.5 bg-neutral-400 rounded-full animate-bounce [animation-delay:-0.15s]"></span>
+                  <span className="w-1.5 h-1.5 bg-neutral-400 rounded-full animate-bounce"></span>
+                </div>
+                <span className="text-xs text-neutral-400 font-medium">Pulse is thinking...</span>
+             </div>
+           </motion.div>
+          )}
+          <div ref={messagesEndRef} />
+        </div>
+      </div>
+
+      {/* Floating Input Dock */}
+      <div className="absolute bottom-0 left-0 right-0 p-4 sm:p-6 bg-gradient-to-t from-white via-white/80 to-transparent dark:from-neutral-950 dark:via-neutral-950/80 pointer-events-none z-20">
+        <div className="max-w-3xl mx-auto pointer-events-auto">
+          
+          <motion.div 
+            layout
+            className={`
+              relative flex items-end gap-2 p-2 rounded-[32px] shadow-2xl transition-all duration-300 border
+              ${isListening 
+                ? 'bg-white dark:bg-neutral-900 border-red-500/50 shadow-red-500/10 ring-4 ring-red-500/10' 
+                : 'bg-white dark:bg-neutral-900 border-white/20 dark:border-neutral-800 shadow-neutral-200/50 dark:shadow-black/50'
+              }
+            `}
+          >
+            {/* Voice Button */}
+            {voiceSupported && (
+               <Button
+               onClick={handleVoiceInput}
+               variant="ghost"
+               size="icon"
+               className={`h-12 w-12 rounded-full flex-shrink-0 transition-all duration-300 ${
+                 isListening 
+                   ? "bg-red-500 text-white hover:bg-red-600 animate-pulse" 
+                   : "text-neutral-400 hover:text-neutral-900 dark:hover:text-white hover:bg-neutral-100 dark:hover:bg-neutral-800"
+               }`}
+             >
+               {isListening ? <StopCircle className="w-6 h-6" /> : <Mic className="w-6 h-6" />}
+             </Button>
+            )}
+
+            {/* Input Field */}
             <Textarea
               value={text}
               onChange={(e) => setText(e.target.value)}
-              placeholder="What's on your mind today?"
-              className="min-h-[140px] resize-none text-neutral-900 dark:text-neutral-100 bg-neutral-50 dark:bg-neutral-950 border-neutral-200 dark:border-neutral-800 focus:ring-2 focus:ring-neutral-900 dark:focus:ring-neutral-100 focus:border-transparent rounded-lg"
+              onKeyDown={handleKeyDown}
+              placeholder={isListening ? "Listening..." : "How are you feeling?"}
+              className="min-h-[48px] max-h-[120px] py-3 px-2 resize-none border-0 shadow-none focus-visible:ring-0 bg-transparent text-[16px] text-neutral-900 dark:text-white placeholder:text-neutral-400"
+              style={{ paddingBottom: '12px' }} 
             />
+
+            {/* Send Button */}
             <Button
-              onClick={handleAnalyze}
-              className="cursor-pointer mt-4 w-full bg-neutral-900 hover:bg-neutral-800 dark:bg-neutral-100 dark:hover:bg-neutral-200 text-neutral-50 dark:text-neutral-900 font-medium transition-colors"
-              disabled={loading}
+              onClick={() => handleSend()}
+              disabled={isAnalyzing || (!text.trim() && !isListening)}
+              size="icon"
+              className={`h-12 w-12 rounded-full flex-shrink-0 transition-all duration-300 ${
+                 text.trim() 
+                 ? "bg-neutral-900 dark:bg-white text-white dark:text-neutral-900 shadow-md transform hover:scale-105" 
+                 : "bg-neutral-100 dark:bg-neutral-800 text-neutral-400"
+              }`}
             >
-              {loading ? (
-                <>
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                  Analyzing your entry{".".repeat(dotCount)}
-                </>
-              ) : (
-                <>
-                  <Sparkles className="mr-2 h-4 w-4" />
-                  Analyze with Pulse AI
-                </>
-              )}
+              {isAnalyzing ? <Loader2 className="w-5 h-5 animate-spin" /> : <Send className="w-5 h-5" />}
             </Button>
-          </div>
-        </Card>
-
-        {/* AI Response */}
-        {loading && (
-          <motion.div
-            className="bg-neutral-900 dark:bg-neutral-800 text-neutral-50 dark:text-neutral-200 p-6 rounded-xl text-sm font-mono mb-8 flex items-center gap-2"
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-          >
-            <span>🤖 Pulse is analyzing your thoughts</span>
-            <div className="flex gap-1">
-              {[0, 1, 2].map((i) => (
-                <motion.span
-                  key={i}
-                  className="w-2 h-2 rounded-full bg-neutral-50 dark:bg-neutral-200"
-                  animate={{
-                    y: ["0%", "-50%", "0%"],
-                  }}
-                  transition={{
-                    duration: 0.6,
-                    repeat: Infinity,
-                    repeatType: "loop",
-                    delay: i * 0.2,
-                  }}
-                />
-              ))}
-            </div>
           </motion.div>
-        )}
-
-        {currentAnalysis && (
-          <motion.div
-            className="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-xl p-6 shadow-sm mb-8"
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-          >
-            {currentAnalysis.mood ? (
-              <>
-                <h2 className="text-lg font-semibold mb-3 text-neutral-800 dark:text-neutral-100">
-                  Pulse Summary
-                </h2>
-                <pre className="text-sm whitespace-pre-wrap leading-relaxed text-neutral-700 dark:text-neutral-300 mb-4">
-                  {displayedSummary}
-                </pre>
-
-                {showMood && currentAnalysis.mood && (
-                  <motion.div
-                    initial={{ opacity: 0, y: 10 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    transition={{ duration: 0.5 }}
-                    className="mb-4"
-                  >
-                    <div
-                      className="inline-flex items-center gap-2 px-3 py-1 rounded-full text-sm font-medium"
-                      style={{
-                        backgroundColor: `${getMoodColor(currentAnalysis.mood)}20`,
-                        color: getMoodColor(currentAnalysis.mood),
-                      }}
-                    >
-                      <span>Detected Mood:</span>
-                      <span className="font-semibold capitalize">{currentAnalysis.mood}</span>
-                      <span>{getMoodEmoji(currentAnalysis.mood)}</span>
-                    </div>
-                  </motion.div>
-                )}
-
-                <div className="bg-neutral-50 dark:bg-neutral-950 p-4 rounded-lg border border-neutral-200 dark:border-neutral-800">
-                  <pre className="text-sm whitespace-pre-wrap leading-relaxed text-neutral-700 dark:text-neutral-300">
-                    {displayedAdvice}
-                  </pre>
-                </div>
-              </>
-            ) : (
-              <>
-                <h2 className="text-lg font-semibold mb-3 text-neutral-800 dark:text-neutral-100">
-                  Pulse Response
-                </h2>
-                <div className="bg-neutral-50 dark:bg-neutral-950 p-4 rounded-lg border border-neutral-200 dark:border-neutral-800">
-                  <pre className="text-sm whitespace-pre-wrap leading-relaxed text-neutral-700 dark:text-neutral-300">
-                    {displayedAdvice}
-                  </pre>
-                </div>
-              </>
-            )}
-          </motion.div>
-        )}
-
-        {/* Previous Journals */}
-        {journals?.length > 0 && (
-          <div className="space-y-4">
-            <div className="flex items-center gap-2 mb-4">
-              <Calendar className="w-5 h-5 text-neutral-600 dark:text-neutral-400" />
-              <h2 className="text-lg font-semibold text-neutral-900 dark:text-neutral-100">
-                Previous Entries
-              </h2>
-              <span className="text-sm text-neutral-500 dark:text-neutral-500">
-                ({journals.length})
-              </span>
-            </div>
-
-            {journals.map((j: Journal) => (
-              <Card
-                key={j.id}
-                className="relative border-l-4 bg-white dark:bg-neutral-900 border-neutral-200 dark:border-neutral-800 hover:shadow-md transition-shadow"
-                style={{ borderLeftColor: getMoodColor(j.mood) }}
-              >
-                <div className="p-5 space-y-3">
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="absolute top-3 right-3 text-neutral-400 cursor-pointer hover:text-red-500"
-                    onClick={() => handleDelete(j.id)}
-                  >
-                    <Trash2 className="w-4 h-4" />
-                  </Button>
-
-                  <div className="flex items-start justify-between gap-4">
-                    <p className="text-neutral-800 dark:text-neutral-200 leading-relaxed flex-1 whitespace-pre-wrap break-words">
-                      {j.text}
-                    </p>
-                    <span className="text-2xl flex-shrink-0">{getMoodEmoji(j.mood)}</span>
-                  </div>
-
-                  <div className="space-y-2 pt-3 border-t border-neutral-100 dark:border-neutral-800">
-                    <div className="text-xs font-medium text-neutral-500 dark:text-neutral-500">
-                      PULSE INSIGHTS
-                    </div>
-                    <p className="text-sm text-neutral-600 dark:text-neutral-400 leading-relaxed">
-                      {j.summary}
-                    </p>
-                    <div className="bg-neutral-50 dark:bg-neutral-950 rounded-lg p-3 border border-neutral-200 dark:border-neutral-800">
-                      <p className="text-sm text-neutral-600 dark:text-neutral-400 leading-relaxed whitespace-pre-wrap">
-                        {j.advice}
-                      </p>
-                    </div>
-                  </div>
-
-                  <div className="flex items-center gap-2 text-xs text-neutral-400 dark:text-neutral-600 pt-2">
-                    <Calendar className="w-3 h-3" />
-                    {new Date(j.createdAt).toLocaleString()}
-                  </div>
-                </div>
-              </Card>
-            ))}
+          
+          <div className="mt-3 text-center">
+            <p className="text-[10px] font-medium text-neutral-400 dark:text-neutral-500 opacity-60">
+              {isListening ? "Tap red button to stop" : "AI is helpful, but not a medical professional."}
+            </p>
           </div>
-        )}
+        </div>
       </div>
 
-      {/* Delete Confirmation Dialog */}
+      {/* Delete Dialog */}
       <Dialog open={openDialog} onOpenChange={setOpenDialog}>
-        <DialogContent>
+        <DialogContent className="sm:rounded-3xl p-6 bg-white dark:bg-neutral-900 border-neutral-100 dark:border-neutral-800">
           <DialogHeader>
-            <DialogTitle>Delete Journal</DialogTitle>
-            <DialogDescription>
-              Are you sure you want to delete this journal entry? This action cannot be undone.
+            <DialogTitle>Delete Message</DialogTitle>
+            <DialogDescription className="mt-2">
+              This will remove this interaction from your therapeutic history.
             </DialogDescription>
           </DialogHeader>
-          <DialogFooter>
-            <Button
-              variant="outline"
-              onClick={() => setOpenDialog(false)}
-              disabled={isDeleting}
-              className="cursor-pointer"
+          <DialogFooter className="gap-2 mt-4">
+            <Button 
+              variant="outline" 
+              onClick={() => setOpenDialog(false)} 
+              className="rounded-xl h-11 border-neutral-200 dark:border-neutral-800"
             >
               Cancel
             </Button>
-            <Button
-              variant="destructive"
-              onClick={confirmDelete}
+            <Button 
+              variant="destructive" 
+              onClick={confirmDelete} 
               disabled={isDeleting}
-              className="cursor-pointer"
+              className="rounded-xl h-11 bg-red-500 hover:bg-red-600"
             >
-              {isDeleting ? (
-                <>
-                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                  Deleting...
-                </>
-              ) : (
-                "Delete"
-              )}
+              Delete
             </Button>
           </DialogFooter>
         </DialogContent>
